@@ -1,0 +1,564 @@
+<!DOCTYPE html><html><head><meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Underwater Sanctuary</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: #0a0a1a;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            font-family: Arial, sans-serif;
+        }
+        #canvas-container {
+            width: 100%;
+            max-width: 1200px;
+            margin: 0 auto;
+            display: flex;
+            justify-content: center;
+            position: relative;
+        }
+        .hint {
+            position: absolute;
+            bottom: 20px;
+            color: rgba(255, 255, 255, 0.3);
+            font-size: 14px;
+            text-align: center;
+            width: 100%;
+            pointer-events: none;
+            transition: opacity 5s;
+        }
+    </style>
+
+<base target="_self">
+
+
+  </head><body><button id="fs-toggle">
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+      <path d="M1.5 1H6v1.5H3v3H1.5V1zM10 1h4.5v4.5H13v-3h-3V1zM1.5 10.5H3v3h3V15H1.5v-4.5zM13 13.5v-3h1.5V15H10v-1.5h3z"></path>
+    </svg>
+  </button>
+    <div id="canvas-container">
+        <div class="hint" id="hint">Click or drag to interact with the jellyfish</div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/p5@1.8.0/lib/p5.js"></script>
+    <script>
+        const sketch = function(p) {
+            let jellyfish = [];
+            let particles = [];
+            let bubbles = [];
+            let lightPoints = [];
+            let bgGradient;
+            let lastInteractionTime = 0;
+            let hintElement;
+            let audioContext;
+            let oscillator;
+            let gainNode;
+            let isAudioPlaying = false;
+
+            p.setup = function() {
+                let canvas = p.createCanvas(p.min(1200, p.windowWidth - 40), p.windowHeight * 0.9);
+                canvas.parent('canvas-container');
+                canvas.mousePressed(handleInteraction);
+                hintElement = document.getElementById('hint');
+                
+                // Create background gradient
+                bgGradient = p.drawingContext.createLinearGradient(0, 0, 0, p.height);
+                bgGradient.addColorStop(0, '#020230');
+                bgGradient.addColorStop(0.5, '#0a3d62');
+                bgGradient.addColorStop(1, '#0c2461');
+                
+                // Initialize jellyfish
+                for (let i = 0; i < 8; i++) {
+                    jellyfish.push(new Jellyfish(
+                        p.random(p.width),
+                        p.random(p.height * 0.2, p.height * 0.8),
+                        p.random(0.5, 1.5)
+                    ));
+                }
+                
+                // Initialize light points
+                for (let i = 0; i < 20; i++) {
+                    lightPoints.push({
+                        x: p.random(p.width),
+                        y: p.random(p.height),
+                        size: p.random(2, 8),
+                        brightness: p.random(0.3, 0.8)
+                    });
+                }
+                
+                // Initialize particles
+                for (let i = 0; i < 200; i++) {
+                    particles.push(new Particle());
+                }
+            };
+
+            p.draw = function() {
+                // Draw background
+                p.drawingContext.fillStyle = bgGradient;
+                p.noStroke();
+                p.rect(0, 0, p.width, p.height);
+                
+                // Draw light rays
+                drawLightRays();
+                
+                // Draw light points
+                drawLightPoints();
+                
+                // Update and draw particles
+                for (let i = particles.length - 1; i >= 0; i--) {
+                    particles[i].update();
+                    particles[i].display();
+                }
+                
+                // Update and draw bubbles
+                for (let i = bubbles.length - 1; i >= 0; i--) {
+                    bubbles[i].update();
+                    bubbles[i].display();
+                    if (bubbles[i].isOffScreen()) {
+                        bubbles.splice(i, 1);
+                    }
+                }
+                
+                // Update and draw jellyfish
+                for (let j of jellyfish) {
+                    j.update();
+                    j.display();
+                }
+                
+                // Handle hint visibility
+                if (p.millis() - lastInteractionTime > 10000 && p.millis() < 30000) {
+                    hintElement.style.opacity = '1';
+                } else {
+                    hintElement.style.opacity = '0';
+                }
+                
+                // Limit frame rate for performance
+                if (p.frameRate() < 30 && jellyfish.length > 5) {
+                    jellyfish.pop();
+                }
+            };
+
+            function handleInteraction() {
+                lastInteractionTime = p.millis();
+                
+                // Create new jellyfish on click
+                if (p.random() > 0.7) {
+                    jellyfish.push(new Jellyfish(p.mouseX, p.mouseY, p.random(0.8, 1.5)));
+                    // Limit total jellyfish count
+                    if (jellyfish.length > 15) {
+                        jellyfish.shift();
+                    }
+                }
+                
+                // Create bubbles on interaction
+                for (let i = 0; i < 10; i++) {
+                    bubbles.push(new Bubble(
+                        p.mouseX + p.random(-20, 20),
+                        p.mouseY + p.random(-20, 20),
+                        p.random(2, 8)
+                    ));
+                }
+                
+                // Handle audio
+                if (!isAudioPlaying) {
+                    initAudio();
+                    playAudio();
+                } else {
+                    stopAudio();
+                }
+            }
+
+            function drawLightRays() {
+                let centerX = p.width / 2;
+                let centerY = p.height * 0.3;
+                
+                for (let i = 0; i < 5; i++) {
+                    let angle = p.map(i, 0, 5, -p.PI/4, p.PI/4);
+                    let length = p.height * 0.7;
+                    let endX = centerX + p.cos(angle) * length;
+                    let endY = centerY + p.sin(angle) * length;
+                    
+                    p.stroke(100, 200, 255, 20);
+                    p.strokeWeight(1 + p.noise(i, p.frameCount * 0.01) * 3);
+                    p.line(centerX, centerY, endX, endY);
+                }
+            }
+
+            function drawLightPoints() {
+                for (let light of lightPoints) {
+                    let flicker = p.noise(light.x, light.y, p.frameCount * 0.01) * 0.3 + 0.7;
+                    let alpha = light.brightness * flicker * 255;
+                    
+                    p.fill(200, 230, 255, alpha);
+                    p.noStroke();
+                    p.ellipse(light.x, light.y, light.size * flicker);
+                }
+            }
+
+            class Jellyfish {
+                constructor(x, y, size) {
+                    this.pos = p.createVector(x, y);
+                    this.vel = p.createVector(p.random(-0.2, 0.2), p.random(0.1, 0.3));
+                    this.size = size;
+                    this.tentacles = [];
+                    this.pulseSpeed = p.random(0.02, 0.05);
+                    this.pulsePhase = p.random(p.TWO_PI);
+                    this.color = p.color(
+                        150 + p.random(100),
+                        150 + p.random(100),
+                        200 + p.random(55),
+                        180
+                    );
+                    this.targetColor = this.color;
+                    this.trail = [];
+                    this.maxTrailLength = 20;
+                    
+                    // Initialize tentacles
+                    for (let i = 0; i < 8; i++) {
+                        this.tentacles.push({
+                            length: p.random(30, 50) * size,
+                            baseWidth: p.random(8, 15) * size,
+                            tipWidth: p.random(1, 3) * size,
+                            noiseOffset: p.random(1000)
+                        });
+                    }
+                }
+
+                update() {
+                    // Apply gentle movement
+                    this.vel.x += p.noise(this.pos.x * 0.01, this.pos.y * 0.01, p.frameCount * 0.01) * 0.2 - 0.1;
+                    this.vel.y += p.sin(p.frameCount * 0.02 + this.pos.x * 0.01) * 0.05;
+                    
+                    // Apply boundary behavior
+                    if (this.pos.x < 0 || this.pos.x > p.width) {
+                        this.vel.x *= -0.5;
+                    }
+                    if (this.pos.y < p.height * 0.1) {
+                        this.vel.y *= -0.5;
+                        this.vel.y += 0.1;
+                    }
+                    if (this.pos.y > p.height * 0.9) {
+                        this.vel.y *= -0.5;
+                        this.vel.y -= 0.1;
+                    }
+                    
+                    // Apply mouse attraction/repulsion
+                    if (p.mouseX > 0 && p.mouseX < p.width && p.mouseY > 0 && p.mouseY < p.height) {
+                        let mouseDist = p.dist(this.pos.x, this.pos.y, p.mouseX, p.mouseY);
+                        if (mouseDist < 150) {
+                            let angleToMouse = p.atan2(this.pos.y - p.mouseY, this.pos.x - p.mouseX);
+                            let force = p.map(mouseDist, 0, 150, 0.5, 0);
+                            this.vel.x += p.cos(angleToMouse) * force * 0.2;
+                            this.vel.y += p.sin(angleToMouse) * force * 0.2;
+                            
+                            // Change color when near mouse
+                            this.targetColor = p.color(
+                                200 + p.sin(p.frameCount * 0.1) * 55,
+                                150 + p.cos(p.frameCount * 0.08) * 55,
+                                255,
+                                200
+                            );
+                        } else {
+                            this.targetColor = this.color;
+                        }
+                    }
+                    
+                    // Limit speed
+                    this.vel.limit(1 * this.size);
+                    this.pos.add(this.vel);
+                    
+                    // Update pulse animation
+                    this.pulsePhase += this.pulseSpeed;
+                    
+                    // Update trail
+                    this.trail.push(p.createVector(this.pos.x, this.pos.y));
+                    if (this.trail.length > this.maxTrailLength) {
+                        this.trail.shift();
+                    }
+                    
+                    // Gradually change color
+                    this.color = p.lerpColor(this.color, this.targetColor, 0.05);
+                }
+
+                display() {
+                    // Draw glow
+                    let pulseSize = p.sin(this.pulsePhase) * 5 + 10;
+                    p.drawingContext.shadowBlur = pulseSize * this.size;
+                    p.drawingContext.shadowColor = p.color(
+                        p.red(this.color),
+                        p.green(this.color),
+                        p.blue(this.color),
+                        100
+                    );
+                    
+                    // Draw body
+                    p.fill(this.color);
+                    p.noStroke();
+                    p.ellipse(
+                        this.pos.x,
+                        this.pos.y - 15 * this.size,
+                        40 * this.size,
+                        30 * this.size
+                    );
+                    
+                    // Draw trail
+                    for (let i = 0; i < this.trail.length; i++) {
+                        let alpha = p.map(i, 0, this.trail.length, 50, 10);
+                        let size = p.map(i, 0, this.trail.length, 5 * this.size, 1);
+                        p.fill(p.red(this.color), p.green(this.color), p.blue(this.color), alpha);
+                        p.ellipse(this.trail[i].x, this.trail[i].y, size);
+                    }
+                    
+                    // Draw tentacles
+                    for (let i = 0; i < this.tentacles.length; i++) {
+                        let tentacle = this.tentacles[i];
+                        let angle = p.map(i, 0, this.tentacles.length, -p.PI/3, p.PI/3);
+                        let noiseOffset = p.frameCount * 0.03 + tentacle.noiseOffset;
+                        
+                        p.beginShape();
+                        p.vertex(this.pos.x, this.pos.y);
+                        
+                        for (let j = 0; j <= 10; j++) {
+                            let t = j / 10;
+                            let x = this.pos.x + p.cos(angle) * tentacle.length * t;
+                            let y = this.pos.y + p.sin(angle) * tentacle.length * t;
+                            
+                            // Add noise-based waving
+                            let waveAmount = p.map(t, 0, 1, 0, 0.5);
+                            x += p.noise(noiseOffset, j * 0.2) * waveAmount * tentacle.length - waveAmount * tentacle.length / 2;
+                            
+                            let width = p.map(t, 0, 1, tentacle.baseWidth, tentacle.tipWidth);
+                            p.curveVertex(x, y + width/2);
+                            p.curveVertex(x, y - width/2);
+                        }
+                        
+                        p.endShape(p.CLOSE);
+                    }
+                    
+                    // Reset shadow
+                    p.drawingContext.shadowBlur = 0;
+                }
+            }
+
+            class Particle {
+                constructor() {
+                    this.reset();
+                    this.z = p.random(1, 3); // Depth factor
+                }
+
+                reset() {
+                    this.pos = p.createVector(p.random(p.width), p.random(p.height));
+                    this.vel = p.createVector(p.random(-0.2, 0.2), p.random(0.1, 0.5));
+                    this.size = p.random(1, 3);
+                    this.life = p.random(100, 200);
+                    this.maxLife = this.life;
+                    this.color = p.color(
+                        150 + p.random(100),
+                        150 + p.random(100),
+                        255,
+                        100
+                    );
+                }
+
+                update() {
+                    this.pos.add(this.vel);
+                    this.life--;
+                    
+                    // Apply gentle noise-based movement
+                    this.vel.x += p.noise(this.pos.x * 0.01, this.pos.y * 0.01, p.frameCount * 0.01) * 0.1 - 0.05;
+                    this.vel.y += p.noise(this.pos.y * 0.01, p.frameCount * 0.01, this.pos.x * 0.01) * 0.05 - 0.025;
+                    
+                    // Limit speed based on depth
+                    this.vel.limit(0.5 / this.z);
+                    
+                    // Reset if off screen or life ended
+                    if (this.pos.y > p.height || this.life <= 0) {
+                        this.reset();
+                        this.pos.y = p.random(-50, 0);
+                    }
+                }
+
+                display() {
+                    let alpha = p.map(this.life, this.maxLife, 0, 100, 0);
+                    p.fill(p.red(this.color), p.green(this.color), p.blue(this.color), alpha);
+                    p.noStroke();
+                    p.ellipse(this.pos.x, this.pos.y, this.size * this.z);
+                }
+            }
+
+            class Bubble {
+                constructor(x, y, size) {
+                    this.pos = p.createVector(x, y);
+                    this.vel = p.createVector(p.random(-0.5, 0.5), p.random(-3, -1));
+                    this.size = size;
+                    this.life = 100 + p.random(50);
+                    this.maxLife = this.life;
+                }
+
+                update() {
+                    this.pos.add(this.vel);
+                    this.vel.x *= 0.98;
+                    this.vel.y *= 0.99;
+                    this.life--;
+                    
+                    // Random horizontal movement
+                    this.vel.x += p.random(-0.1, 0.1);
+                }
+
+                display() {
+                    let alpha = p.map(this.life, this.maxLife, 0, 200, 0);
+                    p.fill(180, 220, 255, alpha);
+                    p.stroke(200, 240, 255, alpha * 0.5);
+                    p.strokeWeight(0.5);
+                    p.ellipse(this.pos.x, this.pos.y, this.size);
+                    
+                    // Bubble highlight
+                    p.fill(255, alpha * 0.8);
+                    p.noStroke();
+                    p.ellipse(
+                        this.pos.x - this.size * 0.3,
+                        this.pos.y - this.size * 0.3,
+                        this.size * 0.3
+                    );
+                }
+
+                isOffScreen() {
+                    return this.pos.y < -this.size || this.life <= 0;
+                }
+            }
+
+            function initAudio() {
+                if (!audioContext) {
+                    audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                    gainNode = audioContext.createGain();
+                    gainNode.gain.value = 0;
+                    gainNode.connect(audioContext.destination);
+                }
+            }
+
+            function playAudio() {
+                if (!audioContext) return;
+                
+                oscillator = audioContext.createOscillator();
+                oscillator.type = 'sine';
+                oscillator.frequency.value = 220;
+                oscillator.connect(gainNode);
+                oscillator.start();
+                
+                // Fade in
+                gainNode.gain.linearRampToValueAtTime(0.1, audioContext.currentTime + 1);
+                isAudioPlaying = true;
+            }
+
+            function stopAudio() {
+                if (!audioContext) return;
+                
+                // Fade out
+                gainNode.gain.linearRampToValueAtTime(0, audioContext.currentTime + 1);
+                setTimeout(() => {
+                    if (oscillator) {
+                        oscillator.stop();
+                        oscillator.disconnect();
+                    }
+                    isAudioPlaying = false;
+                }, 1000);
+            }
+
+            p.mouseMoved = function() {
+                lastInteractionTime = p.millis();
+                
+                // Create gentle bubbles when mouse moves
+                if (p.frameCount % 3 === 0 && p.mouseX > 0 && p.mouseX < p.width && p.mouseY > 0 && p.mouseY < p.height) {
+                    bubbles.push(new Bubble(
+                        p.mouseX + p.random(-10, 10),
+                        p.mouseY + p.random(-10, 10),
+                        p.random(2, 5)
+                    ));
+                }
+            };
+
+            p.mouseDragged = function() {
+                lastInteractionTime = p.millis();
+                
+                // Create more bubbles when dragging
+                if (p.frameCount % 2 === 0) {
+                    bubbles.push(new Bubble(
+                        p.mouseX + p.random(-15, 15),
+                        p.mouseY + p.random(-15, 15),
+                        p.random(3, 6)
+                    ));
+                }
+            };
+
+            p.windowResized = function() {
+                p.resizeCanvas(p.min(1200, p.windowWidth - 40), p.windowHeight * 0.9);
+                
+                // Recreate background gradient
+                bgGradient = p.drawingContext.createLinearGradient(0, 0, 0, p.height);
+                bgGradient.addColorStop(0, '#020230');
+                bgGradient.addColorStop(0.5, '#0a3d62');
+                bgGradient.addColorStop(1, '#0c2461');
+            };
+        };
+
+        new p5(sketch);
+    
+function touchMoved() {
+  // Forward touch events to mouse events
+  if (typeof mouseMoved === 'function') {
+    mouseMoved();
+  }
+  return false; // Prevent default
+}
+
+function touchStarted() {
+  // Forward to mousePressed
+  if (typeof mousePressed === 'function') {
+    mousePressed();
+  }
+  return false; // Prevent default
+}
+
+function touchEnded() {
+  // Forward to mouseReleased
+  if (typeof mouseReleased === 'function') {
+    mouseReleased();
+  }
+  return false; // Prevent default
+}
+  // Fullscreen toggle
+  document.getElementById('fs-toggle').addEventListener('click', function() {
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen().catch(err => {
+        console.log('Fullscreen request failed: ', err);
+      });
+    } else {
+      if (document.exitFullscreen) {
+        document.exitFullscreen();
+      }
+    }
+  });
+  
+  // Hide fullscreen button after inactivity
+  const fsButton = document.getElementById('fs-toggle');
+  let timeout;
+  document.addEventListener('mousemove', function() {
+    fsButton.style.opacity = '0.3';
+    clearTimeout(timeout);
+    timeout = setTimeout(() => {
+      fsButton.style.opacity = '0';
+    }, 2000);
+  });
+  </script>
+
+              
+          
+                
+          
+              
+</body></html>
